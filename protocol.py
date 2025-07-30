@@ -4,6 +4,7 @@ import struct
 class Protocol:
     HEADER_FMT = '<16s B H I'  # little-endian: 16s=client_id, B=version, H=code, I=payload_size
     HEADER_SIZE = struct.calcsize(HEADER_FMT)
+    HEADER_FMT_ANSWER = '<B H I'
 
     @staticmethod
     def recv_exact(conn, n: int) -> bytes:
@@ -24,5 +25,6 @@ class Protocol:
 
     @classmethod
     def make_response(cls, version: int, code: int, payload: bytes = b'') -> bytes:
-        header = struct.pack(cls.HEADER_FMT, b'\0' * 16, version, code, len(payload))
+        payload_size = len(payload)
+        header = struct.pack(cls.HEADER_FMT_ANSWER, version, code, payload_size)
         return header + payload

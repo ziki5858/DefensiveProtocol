@@ -10,6 +10,7 @@ from handlers import HANDLERS, HandlerContext
 HOST = '0.0.0.0'
 PORT = 12345
 
+
 def handle_client(conn, addr, registry: ClientRegistry):
     """
     Read a request, dispatch to the appropriate handler, and send response.
@@ -30,6 +31,7 @@ def handle_client(conn, addr, registry: ClientRegistry):
     finally:
         conn.close()
 
+
 def main():
     registry = ClientRegistry()
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
@@ -44,6 +46,6 @@ def main():
                 daemon=True
             ).start()
 
+
 if __name__ == '__main__':
     main()
-
