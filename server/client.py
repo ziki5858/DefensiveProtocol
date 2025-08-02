@@ -41,6 +41,8 @@ Available commands:
   REGISTER
   USERS
   GETPK <client_id_hex>
+  KEYREQ <client_id_hex>
+  SYMKEY <client_id_hex> <hex_blob>
   SENDTEXT <client_id_hex> <message>
   SENDFILE <client_id_hex> <file_path>
   EXIT
@@ -51,7 +53,6 @@ Available commands:
 # ---------------------------------------------
 
 def make_packet(client_id: bytes, code: int, payload: bytes) -> bytes:
-    # Pack header: ClientID (16s), Version (B), Code (H), Payload Size (I)
     header = struct.pack('<16s B H I', client_id, VERSION, code, len(payload))
     return header + payload
 
@@ -63,9 +64,7 @@ my_client_id = b'\0' * 16
 # ---------------------------------------------
 
 def validate_response(ver: int, code: int, size: int, body: bytes):
-    """Raise AssertionError if the server reply doesn't match the expected layout."""
     assert ver == VERSION, f"Unexpected version: got {ver}, want {VERSION}"
-
     if code == 2100:
         assert size == 16, f"2100 payload size should be 16, got {size}"
     elif code == 2101:
@@ -87,7 +86,6 @@ def validate_response(ver: int, code: int, size: int, body: bytes):
 
 def main():
     global my_client_id
-
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.connect((HOST, PORT))
         print(f"Connected to {HOST}:{PORT}.")
@@ -100,18 +98,15 @@ def main():
             parts = line.split(' ', 2)
             cmd = parts[0].upper()
 
-            # REGISTER command
             if cmd == 'REGISTER':
                 name = input("Username: ").strip()
                 public_key = b'\0' * 160
                 payload = name.encode('ascii').ljust(255, b'\0') + public_key
                 packet = make_packet(my_client_id, 600, payload)
 
-            # USERS list command (601)
             elif cmd == 'USERS':
                 packet = make_packet(my_client_id, 601, b'')
 
-            # GETPK command (602)
             elif cmd == 'GETPK' and len(parts) >= 2:
                 try:
                     target_id = bytes.fromhex(parts[1])
@@ -120,7 +115,27 @@ def main():
                     print("Invalid client_id hex.")
                     continue
 
-            # SENDTEXT command (603, msg_type = 3)
+            # Key request (msg_type=1)
+            elif cmd == 'KEYREQ' and len(parts) >= 2:
+                try:
+                    to_id = bytes.fromhex(parts[1])
+                except ValueError:
+                    print("Invalid client_id hex.")
+                    continue
+                header = to_id + bytes([1]) + struct.pack('<I', 0)
+                packet = make_packet(my_client_id, 603, header)
+
+            # Symmetric-key transfer (msg_type=2)
+            elif cmd == 'SYMKEY' and len(parts) == 3:
+                try:
+                    to_id = bytes.fromhex(parts[1])
+                    sym_blob = bytes.fromhex(parts[2])
+                except ValueError:
+                    print("Invalid hex data.")
+                    continue
+                header = to_id + bytes([2]) + struct.pack('<I', len(sym_blob))
+                packet = make_packet(my_client_id, 603, header + sym_blob)
+
             elif cmd == 'SENDTEXT' and len(parts) == 3:
                 try:
                     to_id = bytes.fromhex(parts[1])
@@ -129,27 +144,23 @@ def main():
                     continue
                 text_bytes = parts[2].encode('utf-8')
                 header = to_id + bytes([3]) + struct.pack('<I', len(text_bytes))
-                payload = header + text_bytes
-                packet = make_packet(my_client_id, 603, payload)
+                packet = make_packet(my_client_id, 603, header + text_bytes)
 
-            # SENDFILE command (603, msg_type = 4)
             elif cmd == 'SENDFILE' and len(parts) == 3:
                 try:
                     to_id = bytes.fromhex(parts[1])
                 except ValueError:
                     print("Invalid client_id hex.")
                     continue
-                file_path = parts[2]
+                file_path = parts[2].strip('"')
                 if not os.path.isfile(file_path):
                     print("File not found.")
                     continue
                 with open(file_path, 'rb') as f:
                     file_data = f.read()
                 header = to_id + bytes([4]) + struct.pack('<I', len(file_data))
-                payload = header + file_data
-                packet = make_packet(my_client_id, 603, payload)
+                packet = make_packet(my_client_id, 603, header + file_data)
 
-            # EXIT command
             elif cmd == 'EXIT':
                 print("Exiting.")
                 break
@@ -166,14 +177,14 @@ def main():
                 print("Server closed connection.")
                 break
 
-            # Parse response
+            # Parse and validate response
             ver, code, size = struct.unpack('<B H I', resp[:7])
             body = resp[7:]
             print(f"Response: version={ver}, code={code}, size={size}")
             validate_response(ver, code, size, body)
 
-            # Process response codes
-            if code == 2100 and len(body) == 16:
+            # Display response details
+            if code == 2100:
                 my_client_id = body
                 print(f"REGISTERED: client_id = {my_client_id.hex()}")
 
@@ -207,7 +218,6 @@ def main():
                     msg_type = body[offset]; offset += 1
                     content_size, = struct.unpack('<I', body[offset:offset+4]); offset += 4
                     content = body[offset:offset+content_size]; offset += content_size
-
                     if msg_type == 3:
                         text = content.decode('utf-8', errors='replace')
                         print(f"  • From {from_id} | MsgID={msg_id} | Text: '{text}'")
