@@ -1,3 +1,6 @@
+// ProtocolBuilder.h
+#pragma once
+
 #include <vector>
 #include <string>
 #include <cstdint>
@@ -16,14 +19,16 @@ public:
             uint32_t payloadSize
     );
 
-    // Register request: username (null-terminated ASCII, max 255 bytes) + public key DER
+    // Register request: username (null-terminated ASCII) + public key DER
     static std::vector<uint8_t> buildRegisterRequest(
             const std::string& username,
             const std::vector<uint8_t>& publicKeyDER
     );
 
     // List clients request (code 601), payloadSize=0
-    static std::vector<uint8_t> buildListRequest(const std::vector<uint8_t>& clientId);
+    static std::vector<uint8_t> buildListRequest(
+            const std::vector<uint8_t>& clientId
+    );
 
     // Get Public Key request (code 602), payload: target Client ID (16 bytes)
     static std::vector<uint8_t> buildGetPublicKeyRequest(
@@ -36,14 +41,14 @@ public:
             const std::vector<uint8_t>& clientId
     );
 
-    // Send Symmetric Key request (code 1 message type within 603), payload: targetId + encryptedSymKey
+    // Send Symmetric Key request (msgType=2 inside code 603)
     static std::vector<uint8_t> buildSendSymKeyRequest(
             const std::vector<uint8_t>& clientId,
             const std::vector<uint8_t>& targetId,
             const std::vector<uint8_t>& encryptedSymKey
     );
 
-    // Send Text Message request (code 3 message type within 603), payload: targetId + IV + ciphertext
+    // Send Text Message request (msgType=3 inside code 603)
     static std::vector<uint8_t> buildSendTextRequest(
             const std::vector<uint8_t>& clientId,
             const std::vector<uint8_t>& targetId,
