@@ -19,6 +19,7 @@ add_executable(client
         Client.cpp
         Connection.cpp
         CryptoManager.cpp
+        ProtocolBuilder.cpp
 )
 
 target_include_directories(client PRIVATE

@@ -1,5 +1,3 @@
-#pragma once
-
 #include <string>
 #include <vector>
 #include <cstdint>
@@ -9,16 +7,20 @@ public:
     Connection(const std::string& serverIP, int serverPort);
     ~Connection();
 
+    // Establishes connection (init Winsock + connect socket)
     bool connectToServer();
+
+    // Sends a complete message (header+payload) and receives full response
+    std::vector<uint8_t> sendAndReceive(const std::vector<uint8_t>& data);
+
+private:
+    bool initializeWinsock();
     bool sendData(const std::vector<uint8_t>& data);
     bool receiveData(std::vector<uint8_t>& buffer, size_t sizeToRead);
 
-private:
     std::string ip;
     int port;
-    int sockfd; // socket file descriptor
-
+    int sockfd;
     bool initialized = false;
-    bool initializeWinsock(); // for Windows (optional)
-    void cleanup();           // for Windows (optional)
 };
+
