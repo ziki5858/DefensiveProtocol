@@ -41,6 +41,7 @@ add_executable(client
         CryptoManager.cpp
         ProtocolBuilder.cpp
         ProtocolParser.cpp
+        Client.cpp
 )
 
 # Link Crypto++ and Winsock

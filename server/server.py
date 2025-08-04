@@ -29,26 +29,35 @@ else:
 
 
 def handle_client(conn, addr, registry: ClientRegistry):
-    """
-    Handle multiple requests over the same connection:
-    Keep reading until the client closes the socket.
-    """
+    print(f"[INFO] Connection from {addr}")
     try:
         while True:
-            # Read request from client
-            client_id, version, code, payload = Protocol.read_request(conn)
+            try:
+                client_id, version, code, payload = Protocol.read_request(conn)
+                print(f"[DEBUG] Received request from {addr}")
+                print(f"[DEBUG] Code: {code}")
+                print(f"[DEBUG] Client ID: {client_id.hex()}")
+                print(f"[DEBUG] Payload size: {len(payload)} bytes")
+            except Exception as e:
+                print(f"[ERROR] Failed to read request: {e}")
+                break
+
             ctx = HandlerContext(client_id, version, payload, registry)
-
-            # Find the appropriate handler and generate response
             handler = HANDLERS.get(code)
-            response = handler(ctx) if handler else Protocol.make_response(version, 9000)
 
-            # Send response back to client
+            if handler:
+                print(f"[INFO] Handling request code {code}")
+                response = handler(ctx)
+            else:
+                print(f"[WARN] Unknown request code {code}, sending error 9000")
+                response = Protocol.make_response(version, 9000)
+
             conn.sendall(response)
-    except (ConnectionError, struct.error):
-        # Client disconnected or parsing error occurred
-        pass
+
+    except Exception as e:
+        print(f"[ERROR] Outer exception: {e}")
     finally:
+        print(f"[INFO] Connection closed from {addr}")
         conn.close()
 
 

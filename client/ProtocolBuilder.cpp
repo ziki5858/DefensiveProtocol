@@ -1,17 +1,17 @@
 // ProtocolBuilder.cpp
 #include "ProtocolBuilder.h"
 
-// Helpers to append big-endian integers
-static void appendUint16BE(std::vector<uint8_t>& buf, uint16_t v) {
-    buf.push_back(uint8_t((v >> 8) & 0xFF));
+// Helpers to append little-endian integers
+static void appendUint16LE(std::vector<uint8_t>& buf, uint16_t v) {
     buf.push_back(uint8_t(v & 0xFF));
+    buf.push_back(uint8_t((v >> 8) & 0xFF));
 }
 
-static void appendUint32BE(std::vector<uint8_t>& buf, uint32_t v) {
-    buf.push_back(uint8_t((v >> 24) & 0xFF));
-    buf.push_back(uint8_t((v >> 16) & 0xFF));
-    buf.push_back(uint8_t((v >> 8) & 0xFF));
+static void appendUint32LE(std::vector<uint8_t>& buf, uint32_t v) {
     buf.push_back(uint8_t(v & 0xFF));
+    buf.push_back(uint8_t((v >> 8) & 0xFF));
+    buf.push_back(uint8_t((v >> 16) & 0xFF));
+    buf.push_back(uint8_t((v >> 24) & 0xFF));
 }
 
 // Build the 23-byte header
@@ -27,9 +27,9 @@ std::vector<uint8_t> ProtocolBuilder::buildHeader(
     // Version (1 byte)
     header.push_back(version);
     // Code (2 bytes)
-    appendUint16BE(header, code);
+    appendUint16LE(header, code);
     // Payload size (4 bytes)
-    appendUint32BE(header, payloadSize);
+    appendUint32LE(header, payloadSize);
     return header;
 }
 

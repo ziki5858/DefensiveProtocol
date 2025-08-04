@@ -28,14 +28,16 @@ static std::vector<uint8_t> hexToBytes(const std::string& s) {
     return v;
 }
 
-Client::Client()
-        : connection(serverAddress, serverPort)
-{
+Client::Client() {
     readServerInfo();
+    connection = std::make_unique<Connection>(serverAddress, serverPort);
+
     if (checkIfRegistered()) {
         loadMeInfo();
     }
 }
+
+
 
 void Client::run() {
     if (checkIfRegistered()) {
@@ -114,22 +116,26 @@ void Client::registerUser() {
     std::cout << "Enter username: ";
     std::string username; std::cin >> username;
 
-    // 1) generate RSA and get public DER
+    std::cout << "[DEBUG] Generating RSA key pair..." << std::endl;
     crypto.generateRSAKeyPair();
     auto pubDER = crypto.getPublicKeyDER();
 
-    // 2) build & send
+    std::cout << "[DEBUG] Building register request..." << std::endl;
     auto req = ProtocolBuilder::buildRegisterRequest(username, pubDER);
-    auto raw = connection.sendAndReceive(req);
 
-    // 3) parse response
+    std::cout << "[DEBUG] Sending request to server..." << std::endl;
+    auto raw = connection->sendAndReceive(req);
+
+    std::cout << "[DEBUG] Parsing response..." << std::endl;
     auto resp = ProtocolParser::parse(raw);
+    std::cout << "[DEBUG] Response code: " << resp.code << std::endl;
+
     if (resp.code != 2100) {
         std::cerr << "Registration failed, code=" << resp.code << "\n";
         return;
     }
 
-    // 4) extract ID + save
+    std::cout << "[DEBUG] Saving ID and private key..." << std::endl;
     clientId.assign(resp.payload.begin(), resp.payload.begin()+16);
     privateKeyPEM = crypto.getPrivateKeyPEM();
     saveMeInfo(username);
@@ -137,17 +143,18 @@ void Client::registerUser() {
     std::cout << "Registered! Your ID=" << toHex(clientId) << "\n";
 }
 
+
 void Client::requestClientsList() {
     // 1) Build the request (601, no payload)
     auto request = ProtocolBuilder::buildListRequest(clientId);
 
     // 2) Send it and get raw response
-    auto rawResponse = connection.sendAndReceive(request);
+    auto rawResponse = connection->sendAndReceive(request);
 
     // 3) Parse the response header + payload
     auto resp = ProtocolParser::parse(rawResponse);
     if (resp.code != 2101) {
-        std::cerr << "Failed to get clients list, server code=" << resp.code << "\n";
+        std::cerr << "Failed to get clients list, server code = " << resp.code << "\n";
         return;
     }
 
@@ -158,66 +165,75 @@ void Client::requestClientsList() {
         std::cerr << "Malformed clients list payload\n";
         return;
     }
+
     size_t count = payloadSize / RECORD_SIZE;
+    clientsMap.clear();
 
     std::cout << "Registered clients (" << count << "):\n";
     for (size_t i = 0; i < count; ++i) {
         auto baseIt = resp.payload.begin() + i * RECORD_SIZE;
 
-        // extract ID
+        // Extract ID
         std::vector<uint8_t> id(baseIt, baseIt + 16);
-        std::ostringstream oss;
-        for (auto b : id) {
-            oss << std::hex << std::setw(2) << std::setfill('0') << (int)b;
-        }
-        std::string idHex = oss.str();
 
-        // extract name (up to null terminator within next 255 bytes)
+        // Extract name (null-terminated inside 255 bytes)
         std::string name;
-        auto nameIt = baseIt + 16;
         for (size_t j = 0; j < 255; ++j) {
-            char c = static_cast<char>(*(nameIt + j));
+            char c = static_cast<char>(*(baseIt + 16 + j));
             if (c == '\0') break;
             name.push_back(c);
         }
 
-        std::cout << "  - " << name << " (ID=" << idHex << ")\n";
+        // Save to map
+        clientsMap[name] = id;
+
+        // Show entry
+        std::cout << "  - " << name << " (ID=" << toHex(id) << ")\n";
     }
 }
 
+
 void Client::requestPublicKey() {
-    // Prompt for target client ID (hex)
-    std::cout << "Enter target client ID (hex): ";
-    std::string hexId;
-    std::cin >> hexId;
-    auto targetId = hexToBytes(hexId);
+    // Ask for username (not ID)
+    std::cout << "Enter username: ";
+    std::string username;
+    std::cin >> username;
 
-    // Build and send the Get Public Key request (code 602)
-    auto request = ProtocolBuilder::buildGetPublicKeyRequest(clientId, targetId);
-    auto rawResponse = connection.sendAndReceive(request);
-
-    // Parse the response
-    auto resp = ProtocolParser::parse(rawResponse);
-    if (resp.code != 2102) {
-        std::cerr << "Failed to fetch public key, server code=" << resp.code << "\n";
+    // Check if username is known
+    if (clientsMap.find(username) == clientsMap.end()) {
+        std::cerr << "No such user in memory. Run option 120 first.\n";
         return;
     }
 
-    // Response payload: [16-byte clientId] + [publicKey DER]
-    std::vector<uint8_t> returnedId(resp.payload.begin(),
-                                    resp.payload.begin() + 16);
-    std::vector<uint8_t> pubKeyDER(resp.payload.begin() + 16,
-                                   resp.payload.end());
+    // Get client ID for given username
+    const std::vector<uint8_t>& targetId = clientsMap[username];
 
-    // Display the result
-    std::cout << "Public key for ID " << toHex(returnedId) << ":\n"
+    // Build and send the request
+    auto req = ProtocolBuilder::buildGetPublicKeyRequest(clientId, targetId);
+    auto raw = connection->sendAndReceive(req);
+    auto resp = ProtocolParser::parse(raw);
+
+    if (resp.code != 2102) {
+        std::cerr << "Server returned error code: " << resp.code << "\n";
+        return;
+    }
+
+    // Payload = [16 bytes clientId] + [DER key]
+    std::vector<uint8_t> returnedId(resp.payload.begin(), resp.payload.begin() + 16);
+    std::vector<uint8_t> pubKeyDER(resp.payload.begin() + 16, resp.payload.end());
+
+    std::string idHex = toHex(returnedId);
+    peerPubKeys[idHex] = pubKeyDER;
+
+    std::cout << "Public key for " << username << " (" << idHex << "):\n"
               << toHex(pubKeyDER) << "\n";
 }
+
 
 void Client::requestWaitingMessages() {
     // 1) Build and send the fetch-messages request (code 604)
     auto request = ProtocolBuilder::buildFetchMessagesRequest(clientId);
-    auto rawResponse = connection.sendAndReceive(request);
+    auto rawResponse = connection->sendAndReceive(request);
 
     // 2) Parse the response
     auto resp = ProtocolParser::parse(rawResponse);
@@ -320,7 +336,7 @@ void Client::requestSymmetricKey() {
     );
     header.insert(header.end(), payload.begin(), payload.end());
 
-    auto rawResponse = connection.sendAndReceive(header);
+    auto rawResponse = connection->sendAndReceive(header);
     auto resp = ProtocolParser::parse(rawResponse);
 
     // Expect 2103 (message stored)
@@ -342,7 +358,7 @@ void Client::sendSymmetricKey() {
 
     // 2) Fetch the peer’s public key from server (code 602)
     auto reqPub = ProtocolBuilder::buildGetPublicKeyRequest(clientId, targetId);
-    auto rawPubResp = connection.sendAndReceive(reqPub);
+    auto rawPubResp = connection->sendAndReceive(reqPub);
     auto pubResp = ProtocolParser::parse(rawPubResp);
     if (pubResp.code != 2102) {
         std::cerr << "Failed to fetch public key, server code=" << pubResp.code << "\n";
@@ -367,7 +383,7 @@ void Client::sendSymmetricKey() {
             targetId,
             encSymKey
     );
-    auto rawResp = connection.sendAndReceive(req);
+    auto rawResp    = connection->sendAndReceive(req);
     auto resp = ProtocolParser::parse(rawResp);
     if (resp.code != 2103) {
         std::cerr << "Failed to send symmetric key, server code=" << resp.code << "\n";
@@ -405,7 +421,7 @@ void Client::sendTextMessage() {
 
     // Build and send the text message request (code 603, msgType=3)
     auto request = ProtocolBuilder::buildSendTextRequest(clientId, targetId, iv, cipher);
-    auto rawResponse = connection.sendAndReceive(request);
+    auto rawResponse = connection->sendAndReceive(request);
     auto resp = ProtocolParser::parse(rawResponse);
 
     // Check for success (2103)

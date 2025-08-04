@@ -4,6 +4,7 @@
 #include <vector>
 #include <cstdint>
 #include <unordered_map>
+#include <memory>
 #include "Connection.h"
 #include "CryptoManager.h"
 #include "ProtocolBuilder.h"
@@ -16,7 +17,7 @@ public:
 
 private:
     // network & crypto
-    Connection    connection;   // socket connection
+    std::unique_ptr<Connection> connection;
     CryptoManager crypto;       // handles AES/RSA
 
     // our identity (loaded/saved in me.info)
@@ -28,6 +29,8 @@ private:
     std::unordered_map<std::string, std::vector<uint8_t>> symKeyStore;
     // cache of peers’ RSA public keys (hex ID → DER bytes)
     std::unordered_map<std::string, std::vector<uint8_t>> peerPubKeys;
+    // cache of clients (ID → public key DER)
+    std::unordered_map<std::string, std::vector<uint8_t>> clientsMap;
 
     // server info
     std::string serverAddress;

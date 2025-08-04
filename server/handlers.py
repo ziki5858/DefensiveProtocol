@@ -18,7 +18,6 @@ class HandlerContext:
         # parse username and public key from registration payload
         return parse_register_payload(self.payload)
 
-
 def handle_register(ctx: HandlerContext) -> bytes:
     """
     Handle registration requests (code 600).
@@ -26,7 +25,9 @@ def handle_register(ctx: HandlerContext) -> bytes:
     """
     username, pubkey = ctx.parse_register()
     new_id = ctx.registry.register(username, pubkey)
+    print(f"[DEBUG] Sending response: code=2100, payload={new_id.hex()} length={len(new_id)}")
     return Protocol.make_response(ctx.version, 2100, new_id)
+
 
 
 def handle_users_list(ctx: HandlerContext) -> bytes:

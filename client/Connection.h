@@ -1,4 +1,5 @@
 #pragma once
+#include <winsock2.h>
 #include <string>
 #include <vector>
 #include <cstdint>
@@ -21,7 +22,7 @@ private:
 
     std::string ip;
     int port;
-    int sockfd;
+    SOCKET  sockfd;
     bool initialized = false;
 };
 

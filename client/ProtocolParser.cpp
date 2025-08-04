@@ -1,36 +1,31 @@
 #include "ProtocolParser.h"
 
-ParsedMessage ProtocolParser::parse(const std::vector<uint8_t>& raw) {
-    // Minimum size = 16 (ID) + 1 (version) + 2 (code) + 4 (payload size)
-    if (raw.size() < 23) {
-        throw std::runtime_error("Raw message too short: missing header");
+ParsedMessage ProtocolParser::parse(const std::vector<uint8_t> &raw) {
+    if (raw.size() < 7) {
+        throw std::runtime_error("Raw response too short");
     }
 
     ParsedMessage msg;
 
-    // 0–15: Client ID
-    msg.clientId.assign(raw.begin(), raw.begin() + 16);
+    // 0: Version
+    msg.version = raw[0];
 
-    // 16: Version
-    msg.version = raw[16];
+    // 1–2: Code (little-endian)
+    msg.code = static_cast<uint16_t>(raw[1]) | (static_cast<uint16_t>(raw[2]) << 8);
 
-    // 17–18: Code (big-endian)
-    msg.code = (static_cast<uint16_t>(raw[17]) << 8)
-               | static_cast<uint16_t>(raw[18]);
+    // 3–6: Payload size (little-endian)
+    uint32_t payloadSize = static_cast<uint32_t>(raw[3]) |
+                           (static_cast<uint32_t>(raw[4]) << 8) |
+                           (static_cast<uint32_t>(raw[5]) << 16) |
+                           (static_cast<uint32_t>(raw[6]) << 24);
 
-    // 19–22: Payload size (big-endian)
-    uint32_t payloadSize = (static_cast<uint32_t>(raw[19]) << 24)
-                           | (static_cast<uint32_t>(raw[20]) << 16)
-                           | (static_cast<uint32_t>(raw[21]) << 8)
-                           |  static_cast<uint32_t>(raw[22]);
-
-    // Validate total length
-    if (raw.size() != 23 + payloadSize) {
-        throw std::runtime_error("Payload size mismatch");
+    // Validate total size
+    if (raw.size() != 7 + payloadSize) {
+        throw std::runtime_error("Payload size mismatch in response");
     }
 
-    // 23…: Payload
-    msg.payload.assign(raw.begin() + 23, raw.end());
+    // 7…: Payload
+    msg.payload.assign(raw.begin() + 7, raw.end());
 
     return msg;
 }

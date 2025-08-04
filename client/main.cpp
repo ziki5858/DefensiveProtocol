@@ -3,6 +3,6 @@
 
 int main() {
     Client client;
-    client.run();  // מתחיל את התפריט והלוגיקה של התוכנית
+    client.run();
     return 0;
 }

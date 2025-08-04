@@ -6,7 +6,7 @@
 #pragma comment(lib, "ws2_32.lib")
 
 Connection::Connection(const std::string& serverIP, int serverPort)
-        : ip(serverIP), port(serverPort), sockfd(INVALID_SOCKET) {}
+        : ip(serverIP), port(serverPort), sockfd(INVALID_SOCKET), initialized(false) {}
 
 Connection::~Connection() {
     if (sockfd != INVALID_SOCKET) {
@@ -34,22 +34,28 @@ bool Connection::connectToServer() {
 
     sockfd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     if (sockfd == INVALID_SOCKET) {
-        std::cerr << "Failed to create socket." << std::endl;
+        std::cerr << "Failed to create socket. Error code: " << WSAGetLastError() << std::endl;
         return false;
     }
 
     sockaddr_in serverAddr{};
     serverAddr.sin_family = AF_INET;
     serverAddr.sin_port = htons(port);
-    inet_pton(AF_INET, ip.c_str(), &serverAddr.sin_addr);
-
-    int res = connect(sockfd, reinterpret_cast<sockaddr*>(&serverAddr), sizeof(serverAddr));
-    if (res == SOCKET_ERROR) {
-        std::cerr << "Connection failed." << std::endl;
+    if (inet_pton(AF_INET, ip.c_str(), &serverAddr.sin_addr) != 1) {
+        std::cerr << "Invalid IP address format: " << ip << std::endl;
         closesocket(sockfd);
         sockfd = INVALID_SOCKET;
         return false;
     }
+
+    if (connect(sockfd, reinterpret_cast<sockaddr*>(&serverAddr), sizeof(serverAddr)) == SOCKET_ERROR) {
+        std::cerr << "Connection failed. Error code: " << WSAGetLastError() << std::endl;
+        closesocket(sockfd);
+        sockfd = INVALID_SOCKET;
+        return false;
+    }
+
+    std::cout << "Connected to server " << ip << ":" << port << std::endl;
     return true;
 }
 
@@ -57,9 +63,9 @@ bool Connection::sendData(const std::vector<uint8_t>& data) {
     int totalSent = 0;
     while (totalSent < static_cast<int>(data.size())) {
         int sent = send(sockfd, reinterpret_cast<const char*>(data.data()) + totalSent,
-                        data.size() - totalSent, 0);
+                        static_cast<int>(data.size()) - totalSent, 0);
         if (sent == SOCKET_ERROR) {
-            std::cerr << "Send failed." << std::endl;
+            std::cerr << "Send failed. Error code: " << WSAGetLastError() << std::endl;
             return false;
         }
         totalSent += sent;
@@ -72,9 +78,9 @@ bool Connection::receiveData(std::vector<uint8_t>& buffer, size_t sizeToRead) {
     size_t totalReceived = 0;
     while (totalReceived < sizeToRead) {
         int received = recv(sockfd, reinterpret_cast<char*>(buffer.data()) + totalReceived,
-                            sizeToRead - totalReceived, 0);
+                            static_cast<int>(sizeToRead - totalReceived), 0);
         if (received <= 0) {
-            std::cerr << "Receive failed or connection closed." << std::endl;
+            std::cerr << "Receive failed or connection closed. Code: " << WSAGetLastError() << std::endl;
             return false;
         }
         totalReceived += received;
@@ -91,17 +97,24 @@ std::vector<uint8_t> Connection::sendAndReceive(const std::vector<uint8_t>& data
         throw std::runtime_error("Failed to send data");
     }
 
-    // First receive header (23 bytes)
+    // First receive response header (7 bytes)
     std::vector<uint8_t> header;
-    if (!receiveData(header, 23)) {
-        throw std::runtime_error("Failed to receive header");
+    if (!receiveData(header, 7)) {
+        throw std::runtime_error("Failed to receive response header");
     }
 
-    // Parse payload size from header (bytes 19-22)
-    uint32_t payloadSize = (header[19] << 24) |
-                           (header[20] << 16) |
-                           (header[21] << 8)  |
-                           (header[22]);
+    // Parse payload size from header (little-endian: bytes 3–6)
+    uint32_t payloadSize = header[3] |
+                           (header[4] << 8) |
+                           (header[5] << 16) |
+                           (header[6] << 24);
+
+    // Debug print: header and payload size
+    std::cout << "[DEBUG] Received response:" << std::endl;
+    std::cout << "  Version: " << static_cast<int>(header[0]) << std::endl;
+    uint16_t code = header[1] | (header[2] << 8);
+    std::cout << "  Code: " << code << std::endl;
+    std::cout << "  Payload size: " << payloadSize << std::endl;
 
     // Receive payload
     std::vector<uint8_t> payload;
@@ -111,10 +124,13 @@ std::vector<uint8_t> Connection::sendAndReceive(const std::vector<uint8_t>& data
         }
     }
 
-    // Combine header+payload
+    std::cout << "  Total received: " << (7 + payloadSize) << " bytes" << std::endl;
+
+    // Combine header + payload
     std::vector<uint8_t> response;
-    response.reserve(23 + payloadSize);
+    response.reserve(7 + payloadSize);
     response.insert(response.end(), header.begin(), header.end());
     response.insert(response.end(), payload.begin(), payload.end());
     return response;
 }
+

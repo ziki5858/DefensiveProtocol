@@ -4,9 +4,7 @@ import struct
 import os
 import logging
 
-# ---------------------------------------------
-#  Dynamic settings: read the port like the server does
-# ---------------------------------------------
+
 DEFAULT_PORT = 1357
 CONFIG_FILE = os.path.join(
     os.path.dirname(os.path.abspath(__file__)),
