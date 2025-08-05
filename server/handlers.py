@@ -60,16 +60,17 @@ def handle_get_public_key(ctx: HandlerContext) -> bytes:
 
 
 def handle_send_message(ctx: HandlerContext) -> bytes:
-    """
-    Handle message sending requests (code 603):
-      • parse: [16s to_client][1B msg_type][4B content_size][content…]
-      • dispatch by msg_type
-      • store message and return response 2103: [16s to_client][4B message_id]
-    """
     data = ctx.payload
-    to_id = data[:16]
-    msg_type = data[16]
+    if len(data) < 21:
+        return Protocol.make_response(ctx.version, 9000)
+
+    to_id     = data[0:16]
+    msg_type  = data[16]
     content_sz = struct.unpack('<I', data[17:21])[0]
+
+    if 21 + content_sz != len(data):
+        return Protocol.make_response(ctx.version, 9000)
+
     content = data[21:21 + content_sz]
 
     if msg_type == 1:
@@ -107,17 +108,12 @@ def handle_fetch_messages(ctx: HandlerContext) -> bytes:
         parts.append(entry)
     return Protocol.make_response(ctx.version, 2104, b''.join(parts))
 
-
 def handle_key_request(ctx: HandlerContext, to_id: bytes, content: bytes) -> bytes:
     """
-    Handle message type 1 (key request):
-      • look up the target client’s public key in the registry
-      • return the 160-byte public key as the message content
+    Message type 1 – request for symmetric key.
+    The content MUST stay empty; server רק מאחסן את הבקשה.
     """
-    # retrieve public key for the requested client
-    public_key = ctx.registry.get_public_key(to_id)
-    # if not found, return empty bytes (client will see no key)
-    return public_key or b''
+    return content
 
 
 def handle_symkey_transfer(ctx: HandlerContext, to_id: bytes, content: bytes) -> bytes:

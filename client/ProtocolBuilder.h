@@ -1,4 +1,3 @@
-// ProtocolBuilder.h
 #pragma once
 
 #include <vector>
@@ -8,10 +7,10 @@
 class ProtocolBuilder {
 public:
     // Builds the 23-byte header:
-    // - clientId: 16 bytes
-    // - version: 1 byte
-    // - code: 2 bytes (big-endian)
-    // - payloadSize: 4 bytes (big-endian)
+    //   - clientId:     16 bytes
+    //   - version:      1 byte
+    //   - code:         2 bytes (big-endian)
+    //   - payloadSize:  4 bytes (big-endian)
     static std::vector<uint8_t> buildHeader(
             const std::vector<uint8_t>& clientId,
             uint8_t version,
@@ -19,40 +18,50 @@ public:
             uint32_t payloadSize
     );
 
-    // Register request: username (null-terminated ASCII) + public key DER
+    // 600: Register → username\0 + publicKeyDER
     static std::vector<uint8_t> buildRegisterRequest(
             const std::string& username,
             const std::vector<uint8_t>& publicKeyDER
     );
 
-    // List clients request (code 601), payloadSize=0
+    // 601: List clients (no payload)
     static std::vector<uint8_t> buildListRequest(
             const std::vector<uint8_t>& clientId
     );
 
-    // Get Public Key request (code 602), payload: target Client ID (16 bytes)
+    // 602: Get Public Key → payload = target Client ID (16 bytes)
     static std::vector<uint8_t> buildGetPublicKeyRequest(
             const std::vector<uint8_t>& clientId,
             const std::vector<uint8_t>& targetId
     );
 
-    // Fetch Messages request (code 604), payloadSize=0
+    // 604: Fetch messages (no payload)
     static std::vector<uint8_t> buildFetchMessagesRequest(
             const std::vector<uint8_t>& clientId
     );
 
-    // Send Symmetric Key request (msgType=2 inside code 603)
+    // 603 + msgType=1: Request symmetric key
+    // payload = [targetId (16)] + [msgType=1] + [contentSize=0]
+    static std::vector<uint8_t> buildRequestSymKey(
+            const std::vector<uint8_t>& clientId,
+            const std::vector<uint8_t>& targetId
+    );
+
+    // 603 + msgType=2: Send symmetric key
+    // payload = [targetId (16)] + [msgType=2] + [contentSize] + [encryptedSymKey]
     static std::vector<uint8_t> buildSendSymKeyRequest(
             const std::vector<uint8_t>& clientId,
             const std::vector<uint8_t>& targetId,
             const std::vector<uint8_t>& encryptedSymKey
     );
 
-    // Send Text Message request (msgType=3 inside code 603)
+    // 603 + msgType=3: Send text message
+    // payload = [targetId (16)] + [msgType=3] + [contentSize] + [iv] + [ciphertext]
     static std::vector<uint8_t> buildSendTextRequest(
             const std::vector<uint8_t>& clientId,
             const std::vector<uint8_t>& targetId,
             const std::vector<uint8_t>& iv,
             const std::vector<uint8_t>& ciphertext
     );
+
 };

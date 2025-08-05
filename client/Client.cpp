@@ -229,76 +229,72 @@ void Client::requestPublicKey() {
               << toHex(pubKeyDER) << "\n";
 }
 
-
 void Client::requestWaitingMessages() {
     // 1) Build and send the fetch-messages request (code 604)
-    auto request = ProtocolBuilder::buildFetchMessagesRequest(clientId);
+    auto request     = ProtocolBuilder::buildFetchMessagesRequest(clientId);
     auto rawResponse = connection->sendAndReceive(request);
-
-    // 2) Parse the response
-    auto resp = ProtocolParser::parse(rawResponse);
+    auto resp        = ProtocolParser::parse(rawResponse);
     if (resp.code != 2104) {
         std::cerr << "Failed to fetch messages, server code=" << resp.code << "\n";
         return;
     }
 
-    // 3) Iterate over each message in the payload:
+    // 2) Iterate through the payload
     size_t idx = 0;
     while (idx < resp.payload.size()) {
         // a) Read sender ID (16 bytes)
-        std::vector<uint8_t> fromId(resp.payload.begin() + idx,
-                                    resp.payload.begin() + idx + 16);
+        std::vector<uint8_t> fromId(
+                resp.payload.begin() + idx,
+                resp.payload.begin() + idx + 16
+        );
         idx += 16;
 
-        // b) Read message ID (4 bytes, big-endian) – we'll ignore it here
-        uint32_t messageId = (resp.payload[idx] << 24) |
-                             (resp.payload[idx+1] << 16) |
-                             (resp.payload[idx+2] << 8) |
-                             resp.payload[idx+3];
+        // b) Read message ID (4 bytes, little-endian)
+        uint32_t messageId =  resp.payload[idx]
+                              | (resp.payload[idx + 1] << 8)
+                              | (resp.payload[idx + 2] << 16)
+                              | (resp.payload[idx + 3] << 24);
         idx += 4;
 
-        // c) Read message type (1 byte)
+        // c) Read msgType (1 byte)
         uint8_t msgType = resp.payload[idx++];
 
-        // d) Read content size (4 bytes, big-endian)
-        uint32_t contentSize = (resp.payload[idx] << 24) |
-                               (resp.payload[idx+1] << 16) |
-                               (resp.payload[idx+2] << 8) |
-                               resp.payload[idx+3];
+        // d) Read content size (4 bytes, little-endian)
+        uint32_t contentSize =  resp.payload[idx]
+                                | (resp.payload[idx + 1] << 8)
+                                | (resp.payload[idx + 2] << 16)
+                                | (resp.payload[idx + 3] << 24);
         idx += 4;
 
         // e) Extract content bytes
-        std::vector<uint8_t> content(resp.payload.begin() + idx,
-                                     resp.payload.begin() + idx + contentSize);
+        std::vector<uint8_t> content(
+                resp.payload.begin() + idx,
+                resp.payload.begin() + idx + contentSize
+        );
         idx += contentSize;
 
-        // f) Decrypt/handle based on msgType
-        std::string senderHex;
-        {
-            std::ostringstream oss;
-            for (auto b : fromId) oss << std::hex << std::setw(2) << std::setfill('0') << int(b);
-            senderHex = oss.str();
+        // f) Convert sender ID to hex string
+        std::ostringstream oss;
+        for (auto b : fromId) {
+            oss << std::hex << std::setw(2) << std::setfill('0') << int(b);
         }
+        std::string senderHex = oss.str();
 
+        // g) Handle based on msgType
         if (msgType == 1) {
             // Symmetric-key request
             std::cout << "[" << senderHex << "] requests your symmetric key\n";
         }
         else if (msgType == 2) {
             // Symmetric-key delivery
-            // Decrypt with our RSA private key
             auto symKey = crypto.decryptRSA(content);
-            // Store for this sender
             symKeyStore[senderHex] = symKey;
             std::cout << "Received symmetric key from " << senderHex << "\n";
         }
         else if (msgType == 3) {
-            // Text message
-            // First 16 bytes of content = IV
-            std::vector<uint8_t> iv(content.begin(), content.begin()+AES::BLOCKSIZE);
-            std::vector<uint8_t> cipher(content.begin()+AES::BLOCKSIZE, content.end());
-
-            // Lookup symmetric key for this sender
+            // Text message: first 16 bytes = IV
+            std::vector<uint8_t> iv(content.begin(), content.begin() + AES::BLOCKSIZE);
+            std::vector<uint8_t> cipher(content.begin() + AES::BLOCKSIZE, content.end());
             auto it = symKeyStore.find(senderHex);
             if (it == symKeyStore.end()) {
                 std::cout << "[" << senderHex << "] sent a text but no key known, cannot decrypt\n";
@@ -309,37 +305,33 @@ void Client::requestWaitingMessages() {
             }
         }
         else {
-            std::cout << "Unknown message type " << int(msgType) << " from " << senderHex << "\n";
+            // Unknown type
+            std::cout << "Unknown message type " << int(msgType)
+                      << " from " << senderHex << "\n";
         }
     }
 }
 
+
 void Client::requestSymmetricKey() {
-    // Prompt for target ID
-    std::cout << "Enter target client ID (hex): ";
-    std::string hexId;
-    std::cin >> hexId;
-    auto targetId = hexToBytes(hexId);
+    // 1) Prompt for recipient username
+    std::cout << "Enter recipient username: ";
+    std::string username;
+    std::cin >> username;
 
-    // Build payload: [messageType=1] + targetId
-    uint8_t messageType = 1;
-    std::vector<uint8_t> payload;
-    payload.push_back(messageType);
-    payload.insert(payload.end(), targetId.begin(), targetId.end());
+    // 2) Lookup client ID
+    if (clientsMap.find(username) == clientsMap.end()) {
+        std::cerr << "No such user in memory. Run option 120 first.\n";
+        return;
+    }
+    const auto& targetId = clientsMap[username];
 
-    // Build & send request (code 603)
-    auto header = ProtocolBuilder::buildHeader(
-            clientId,
-            version,
-            /* code */ 603,
-            static_cast<uint32_t>(payload.size())
-    );
-    header.insert(header.end(), payload.begin(), payload.end());
+    // 3) Build & send the "request sym key" message
+    auto req = ProtocolBuilder::buildRequestSymKey(clientId, targetId);
+    auto raw = connection->sendAndReceive(req);
 
-    auto rawResponse = connection->sendAndReceive(header);
-    auto resp = ProtocolParser::parse(rawResponse);
-
-    // Expect 2103 (message stored)
+    // 4) Parse and check response
+    auto resp = ProtocolParser::parse(raw);
     if (resp.code != 2103) {
         std::cerr << "Symmetric-key request failed, server code="
                   << resp.code << "\n";
@@ -349,56 +341,81 @@ void Client::requestSymmetricKey() {
     std::cout << "Symmetric-key request sent successfully.\n";
 }
 
-void Client::sendSymmetricKey() {
-    // 1) Prompt for target client ID (hex)
-    std::cout << "Enter target client ID (hex): ";
-    std::string hexId;
-    std::cin >> hexId;
-    auto targetId = hexToBytes(hexId);
 
-    // 2) Fetch the peer’s public key from server (code 602)
+void Client::sendSymmetricKey() {
+    // 1. Prompt for recipient username
+    std::cout << "Enter recipient username: ";
+    std::string username;
+    std::cin >> username;
+    if (!clientsMap.count(username)) {
+        std::cerr << "Error: No such user in memory. Please run option 120 first.\n";
+        return;
+    }
+    auto targetId = clientsMap[username];
+
+    // 2. Request peer’s public key (code 602)
     auto reqPub = ProtocolBuilder::buildGetPublicKeyRequest(clientId, targetId);
     auto rawPubResp = connection->sendAndReceive(reqPub);
     auto pubResp = ProtocolParser::parse(rawPubResp);
     if (pubResp.code != 2102) {
-        std::cerr << "Failed to fetch public key, server code=" << pubResp.code << "\n";
+        std::cerr << "Error: Failed to fetch public key, server code=" << pubResp.code << "\n";
         return;
     }
-    // payload = [16-byte ID] + [publicKey DER]
-    std::vector<uint8_t> peerPubDER(
-            pubResp.payload.begin() + 16,
-            pubResp.payload.end()
-    );
+    // Extract DER‐encoded public key (skip 16‐byte header)
+    std::vector<uint8_t> peerPubDER(pubResp.payload.begin() + 16, pubResp.payload.end());
 
-    // 3) Generate a new AES key and store it locally
+    // 3. Generate AES key and store it
     auto symKey = crypto.generateAESKey();
+    std::string hexId = toHex(targetId);
     symKeyStore[hexId] = symKey;
 
-    // 4) Encrypt the symmetric key with the peer’s RSA public key
+    // 4. Encrypt AES key with peer’s RSA public key
     auto encSymKey = crypto.encryptRSA(symKey, peerPubDER);
 
-    // 5) Build and send the “send symmetric key” request (code 603, msgType=2)
-    auto req = ProtocolBuilder::buildSendSymKeyRequest(
+    // Debug: ensure encrypted key is non-empty
+    std::cout << "[DEBUG] EncryptedSymKey size: " << encSymKey.size() << "\n";
+    if (encSymKey.empty()) {
+        std::cerr << "Error: encryptedSymKey is empty, aborting send.\n";
+        return;
+    }
+
+    // 5. Build send-sym-key request (code 603 + msgType=2)
+    auto reqBytes = ProtocolBuilder::buildSendSymKeyRequest(
             clientId,
             targetId,
             encSymKey
     );
-    auto rawResp    = connection->sendAndReceive(req);
-    auto resp = ProtocolParser::parse(rawResp);
+
+    // Debug: show total bytes including header + payload
+    std::cout << "[DEBUG] Will send " << reqBytes.size()
+              << " bytes (payload=" << encSymKey.size() << ")\n";
+
+    // 6. Send and receive in one shot
+    auto rawResp = connection->sendAndReceive(reqBytes);
+    auto resp    = ProtocolParser::parse(rawResp);
     if (resp.code != 2103) {
-        std::cerr << "Failed to send symmetric key, server code=" << resp.code << "\n";
+        std::cerr << "Error: Failed to send symmetric key, server code=" << resp.code << "\n";
         return;
     }
 
     std::cout << "Symmetric key sent successfully.\n";
 }
 
+
 void Client::sendTextMessage() {
-    // Prompt for target client ID in hex
-    std::cout << "Enter target client ID (hex): ";
-    std::string hexId;
-    std::cin >> hexId;
-    auto targetId = hexToBytes(hexId);
+    // Prompt for recipient username
+    std::cout << "Enter recipient username: ";
+    std::string username;
+    std::cin >> username;
+
+    // Lookup target ID from clientsMap
+    if (!clientsMap.count(username)) {
+        std::cerr << "No such user in memory. Run option 120 first.\n";
+        return;
+    }
+
+    auto targetId = clientsMap[username];
+    std::string hexId = toHex(targetId);
 
     // Prompt for message text
     std::cout << "Enter message: ";
@@ -409,7 +426,7 @@ void Client::sendTextMessage() {
     // Ensure we have a symmetric key for this peer
     auto it = symKeyStore.find(hexId);
     if (it == symKeyStore.end()) {
-        std::cerr << "No symmetric key known for " << hexId << ". Request one first.\n";
+        std::cerr << "No symmetric key known for " << username << ". Request one first.\n";
         return;
     }
     auto symKey = it->second;

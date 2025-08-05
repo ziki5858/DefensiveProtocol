@@ -6,7 +6,8 @@ from typing import Dict, Tuple, List, Optional
 
 def parse_register_payload(payload: bytes) -> Tuple[str, bytes]:
     name = payload[:255].split(b'\0', 1)[0].decode('ascii')
-    pubkey = payload[255:255+160]
+    offset = payload.find(b'\0') + 1  # Find null terminator
+    pubkey = payload[offset:]         # Take the rest as the DER-encoded public key
     return name, pubkey
 
 class ClientRegistry:
