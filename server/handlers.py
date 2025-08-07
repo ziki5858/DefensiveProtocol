@@ -18,6 +18,7 @@ class HandlerContext:
         # parse username and public key from registration payload
         return parse_register_payload(self.payload)
 
+
 def handle_register(ctx: HandlerContext) -> bytes:
     """
     Handle registration requests (code 600).
@@ -27,7 +28,6 @@ def handle_register(ctx: HandlerContext) -> bytes:
     new_id = ctx.registry.register(username, pubkey)
     print(f"[DEBUG] Sending response: code=2100, payload={new_id.hex()} length={len(new_id)}")
     return Protocol.make_response(ctx.version, 2100, new_id)
-
 
 
 def handle_users_list(ctx: HandlerContext) -> bytes:
@@ -64,8 +64,8 @@ def handle_send_message(ctx: HandlerContext) -> bytes:
     if len(data) < 21:
         return Protocol.make_response(ctx.version, 9000)
 
-    to_id     = data[0:16]
-    msg_type  = data[16]
+    to_id = data[0:16]
+    msg_type = data[16]
     content_sz = struct.unpack('<I', data[17:21])[0]
 
     if 21 + content_sz != len(data):
@@ -108,6 +108,7 @@ def handle_fetch_messages(ctx: HandlerContext) -> bytes:
         parts.append(entry)
     return Protocol.make_response(ctx.version, 2104, b''.join(parts))
 
+
 def handle_key_request(ctx: HandlerContext, to_id: bytes, content: bytes) -> bytes:
     """
     Message type 1 – request for symmetric key.
@@ -123,11 +124,8 @@ def handle_symkey_transfer(ctx: HandlerContext, to_id: bytes, content: bytes) ->
       • store the encrypted symmetric key blob as-is
       • return the original blob so it will be delivered to the recipient
     """
-    # ensure the recipient is registered
     if ctx.registry.get_public_key(to_id) is None:
-        # unknown recipient → nothing to store
         return b''
-    # the content is already encrypted by the sender with the recipient's public key
     return content
 
 
@@ -138,10 +136,8 @@ def handle_text_message(ctx: HandlerContext, to_id: bytes, content: bytes) -> by
       • (optional) filter or process the text
       • return the text content to be stored and later delivered
     """
-    # ensure the recipient is registered
     if ctx.registry.get_public_key(to_id) is None:
         return b''
-    # here you could sanitize or moderate the text before forwarding
     return content
 
 
@@ -152,13 +148,8 @@ def handle_file_transfer(ctx: HandlerContext, to_id: bytes, content: bytes) -> b
       • save the raw file bytes (if desired) or forward as-is
       • return the file content to be stored and later delivered
     """
-    # ensure the recipient is registered
     if ctx.registry.get_public_key(to_id) is None:
         return b''
-    # optionally, save content to disk:
-    # filename = f"uploads/{uuid.uuid4().hex}"
-    # with open(filename, "wb") as f:
-    #     f.write(content)
     return content
 
 

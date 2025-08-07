@@ -54,4 +54,5 @@ private:
     void sendTextMessage();
     void requestSymmetricKey();
     void sendSymmetricKey();
+    void sendFileMessage();
 };

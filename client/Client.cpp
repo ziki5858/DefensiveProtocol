@@ -92,6 +92,7 @@ void Client::showMenu() {
               "150) Send text\n"
               "151) Request sym key\n"
               "152) Send sym key\n"
+              "153) Send file\n"
               "0) Exit\n"
               "? ";
 }
@@ -105,6 +106,7 @@ void Client::handleChoice(int c) {
         case 150: sendTextMessage();       break;
         case 151: requestSymmetricKey();   break;
         case 152: sendSymmetricKey();      break;
+        case 153: sendFileMessage();     break;
         default:  std::cout<<"Invalid choice\n";
     }
 }
@@ -116,26 +118,17 @@ void Client::registerUser() {
     std::cout << "Enter username: ";
     std::string username; std::cin >> username;
 
-    std::cout << "[DEBUG] Generating RSA key pair..." << std::endl;
     crypto.generateRSAKeyPair();
     auto pubDER = crypto.getPublicKeyDER();
-
-    std::cout << "[DEBUG] Building register request..." << std::endl;
     auto req = ProtocolBuilder::buildRegisterRequest(username, pubDER);
-
-    std::cout << "[DEBUG] Sending request to server..." << std::endl;
     auto raw = connection->sendAndReceive(req);
-
-    std::cout << "[DEBUG] Parsing response..." << std::endl;
     auto resp = ProtocolParser::parse(raw);
-    std::cout << "[DEBUG] Response code: " << resp.code << std::endl;
 
     if (resp.code != 2100) {
         std::cerr << "Registration failed, code=" << resp.code << "\n";
         return;
     }
 
-    std::cout << "[DEBUG] Saving ID and private key..." << std::endl;
     clientId.assign(resp.payload.begin(), resp.payload.begin()+16);
     privateKeyPEM = crypto.getPrivateKeyPEM();
     saveMeInfo(username);
@@ -304,6 +297,31 @@ void Client::requestWaitingMessages() {
                 std::cout << "[" << senderHex << "] says: " << text << "\n";
             }
         }
+        else if (msgType == 4) {
+            // File message: first AES::BLOCKSIZE bytes = IV
+            std::vector<uint8_t> iv(
+                    content.begin(),
+                    content.begin() + AES::BLOCKSIZE
+            );
+            std::vector<uint8_t> cipher(
+                    content.begin() + AES::BLOCKSIZE,
+                    content.end()
+            );
+
+            auto it = symKeyStore.find(senderHex);
+            if (it == symKeyStore.end()) {
+                std::cout << "No symmetric key to decrypt file from " << senderHex << "\n";
+            } else {
+                // decrypt and save to disk
+                auto plain = crypto.aesCBCDecrypt(cipher, it->second, iv);
+                std::string fname = "received_from_" + senderHex + ".dat";
+                std::ofstream out(fname, std::ios::binary);
+                out.write(reinterpret_cast<const char*>(plain.data()), plain.size());
+                out.close();
+                std::cout << "Saved file to " << fname << "\n";
+            }
+        }
+
         else {
             // Unknown type
             std::cout << "Unknown message type " << int(msgType)
@@ -448,4 +466,62 @@ void Client::sendTextMessage() {
     }
 
     std::cout << "Text message sent successfully.\n";
+}
+
+void Client::sendFileMessage() {
+    // 1. Prompt for recipient username
+    std::cout << "Enter recipient username: ";
+    std::string username;
+    std::cin >> username;
+    if (!clientsMap.count(username)) {
+        std::cerr << "No such user. Run option 120 first.\n";
+        return;
+    }
+    auto targetId = clientsMap[username];
+    std::string hexId = toHex(targetId);
+
+    // 2. Ensure we have a symmetric key for this peer
+    auto it = symKeyStore.find(hexId);
+    if (it == symKeyStore.end()) {
+        std::cerr << "No symmetric key for " << username << ". Request one first.\n";
+        return;
+    }
+    auto symKey = it->second;
+
+    // 3. Read file path and load into byte vector
+    std::cout << "Enter file path: ";
+    std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+    std::string path;
+    std::getline(std::cin, path);
+    std::ifstream in(path, std::ios::binary);
+    if (!in) {
+        std::cerr << "Cannot open file: " << path << "\n";
+        return;
+    }
+    std::vector<uint8_t> fileBytes{
+            std::istreambuf_iterator<char>(in),
+            std::istreambuf_iterator<char>()
+    };
+
+    // 4. Generate a fresh IV and encrypt the file bytes with AES-CBC
+    auto iv     = crypto.generateIV();
+    auto cipher = crypto.aesCBCEncrypt(fileBytes, symKey, iv);
+
+    // 5. Build the 603 packet
+    auto req = ProtocolBuilder::buildSendFileRequest(
+            clientId,   // fromId (ignored by builder)
+            targetId,   // toId
+            iv,
+            cipher
+    );
+
+    // 6. Send and receive the server response
+    auto rawResp = connection->sendAndReceive(req);
+    auto resp    = ProtocolParser::parse(rawResp);
+    if (resp.code != 2103) {
+        std::cerr << "Failed to send file, server code = " << resp.code << "\n";
+        return;
+    }
+
+    std::cout << "File sent successfully.\n";
 }

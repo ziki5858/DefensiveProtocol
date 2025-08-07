@@ -64,4 +64,11 @@ public:
             const std::vector<uint8_t>& ciphertext
     );
 
+    static std::vector<uint8_t> buildSendFileRequest(
+            const std::vector<uint8_t>& fromId,
+            const std::vector<uint8_t>& toId,
+            const std::vector<uint8_t>& iv,
+            const std::vector<uint8_t>& cipherData
+    );
+
 };
