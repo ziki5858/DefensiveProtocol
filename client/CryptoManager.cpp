@@ -1,4 +1,3 @@
-// CryptoManager.cpp
 #include "CryptoManager.h"
 #include <cryptlib.h>
 #include <osrng.h>
@@ -12,6 +11,9 @@
 #include <stdexcept>
 
 using namespace CryptoPP;
+
+// Zero IV for AES-CBC (16 bytes of 0)
+static const std::vector<uint8_t> ZERO_IV(AES::BLOCKSIZE, 0x00);
 
 // --- Symmetric (AES-CBC) ---
 
@@ -30,38 +32,30 @@ std::vector<uint8_t> CryptoManager::generateIV() const {
 }
 
 std::vector<uint8_t> CryptoManager::aesCBCEncrypt(
-        const std::vector<uint8_t>& plaintext,
-        const std::vector<uint8_t>& key,
-        const std::vector<uint8_t>& iv) const
+        const std::vector<uint8_t>& plain,
+        const std::vector<uint8_t>& key) const
 {
-    std::vector<uint8_t> out;
-    out.reserve(plaintext.size() + AES::BLOCKSIZE);
-
     CBC_Mode<AES>::Encryption enc;
-    enc.SetKeyWithIV(key.data(), key.size(), iv.data());
+    enc.SetKeyWithIV(key.data(), key.size(), ZERO_IV.data());
 
-    StreamTransformationFilter filter(enc, new VectorSink(out));
-    filter.Put(plaintext.data(), plaintext.size());
-    filter.MessageEnd();
-
+    std::vector<uint8_t> out;
+    StreamTransformationFilter f(enc, new VectorSink(out));
+    f.Put(plain.data(), plain.size());
+    f.MessageEnd();
     return out;
 }
 
 std::vector<uint8_t> CryptoManager::aesCBCDecrypt(
-        const std::vector<uint8_t>& ciphertext,
-        const std::vector<uint8_t>& key,
-        const std::vector<uint8_t>& iv) const
+        const std::vector<uint8_t>& cipher,
+        const std::vector<uint8_t>& key) const
 {
-    std::vector<uint8_t> out;
-    out.reserve(ciphertext.size());
-
     CBC_Mode<AES>::Decryption dec;
-    dec.SetKeyWithIV(key.data(), key.size(), iv.data());
+    dec.SetKeyWithIV(key.data(), key.size(), ZERO_IV.data());
 
-    StreamTransformationFilter filter(dec, new VectorSink(out));
-    filter.Put(ciphertext.data(), ciphertext.size());
-    filter.MessageEnd();
-
+    std::vector<uint8_t> out;
+    StreamTransformationFilter f(dec, new VectorSink(out));
+    f.Put(cipher.data(), cipher.size());
+    f.MessageEnd();
     return out;
 }
 

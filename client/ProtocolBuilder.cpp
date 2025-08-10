@@ -118,25 +118,20 @@ std::vector<uint8_t> ProtocolBuilder::buildSendSymKeyRequest(
 }
 
 // -----------------------------------------------------------------------------
-// 603 + msgType = 3  →  Send text message
-//    payload = targetId (16) + 3 + size (4) + (iv + ciphertext)
+// 603 + msgType = 3  →  Send text message (IV is all-zero, so we send cipher only)
+//    payload = targetId (16) + 3 + size (4) + ciphertext
 // -----------------------------------------------------------------------------
 std::vector<uint8_t> ProtocolBuilder::buildSendTextRequest(
         const std::vector<uint8_t>& clientId,
         const std::vector<uint8_t>& targetId,
-        const std::vector<uint8_t>& iv,
         const std::vector<uint8_t>& ciphertext)
 {
-    std::vector<uint8_t> content;
-    content.insert(content.end(), iv.begin(), iv.end());
-    content.insert(content.end(), ciphertext.begin(), ciphertext.end());
-
+    /* payload = [toId][msgType=3][size][ciphertext] */
     std::vector<uint8_t> payload;
-    payload.insert(payload.end(), targetId.begin(), targetId.end());     // 16
-    payload.push_back(3);                                               // type
-    appendUint32LE(payload,
-                   static_cast<uint32_t>(content.size()));              // size
-    payload.insert(payload.end(), content.begin(), content.end());      // data
+    payload.insert(payload.end(), targetId.begin(), targetId.end());     // 16 B
+    payload.push_back(3);                                               // msgType
+    appendUint32LE(payload, static_cast<uint32_t>(ciphertext.size()));   // size
+    payload.insert(payload.end(), ciphertext.begin(), ciphertext.end()); // data
 
     auto header = buildHeader(clientId, 1, 603,
                               static_cast<uint32_t>(payload.size()));
@@ -145,28 +140,21 @@ std::vector<uint8_t> ProtocolBuilder::buildSendTextRequest(
 }
 
 // -----------------------------------------------------------------------------
-// 603 + msgType = 4  →  Send file
-//    payload = targetId (16) + 4 + size (4) + (iv + ciphertext)
+// 603 + msgType = 4  →  Send file (cipher only, IV = 0 on both sides)
+//    payload = targetId (16) + 4 + size (4) + cipherData
 // -----------------------------------------------------------------------------
 std::vector<uint8_t> ProtocolBuilder::buildSendFileRequest(
         const std::vector<uint8_t>& clientId,
         const std::vector<uint8_t>& targetId,
-        const std::vector<uint8_t>& iv,
         const std::vector<uint8_t>& cipherData)
 {
-    // 1) build [IV + cipher] block
-    std::vector<uint8_t> content;
-    content.insert(content.end(), iv.begin(), iv.end());
-    content.insert(content.end(), cipherData.begin(), cipherData.end());
-
-    // 2) build payload = [toId][msgType=4][size][content]
+    /* payload = [toId][msgType=4][size][cipherData] */
     std::vector<uint8_t> payload;
     payload.insert(payload.end(), targetId.begin(), targetId.end());     // 16 B
     payload.push_back(4);                                               // msgType
-    appendUint32LE(payload, static_cast<uint32_t>(content.size()));      // size
-    payload.insert(payload.end(), content.begin(), content.end());      // data
+    appendUint32LE(payload, static_cast<uint32_t>(cipherData.size()));   // size
+    payload.insert(payload.end(), cipherData.begin(), cipherData.end()); // data
 
-    // 3) build header (version=1, code=603) + clientId + payload
     auto header = buildHeader(clientId, 1, 603,
                               static_cast<uint32_t>(payload.size()));
     header.insert(header.end(), payload.begin(), payload.end());

@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <unordered_map>
 #include <memory>
+#include <filesystem>
 #include "Connection.h"
 #include "CryptoManager.h"
 #include "ProtocolBuilder.h"
@@ -16,37 +17,40 @@ public:
     void run();
 
 private:
-    // network & crypto
+    /* ─── Network & crypto ─────────────────────────── */
     std::unique_ptr<Connection> connection;
-    CryptoManager crypto;       // handles AES/RSA
+    CryptoManager               crypto;           // AES / RSA helpers
 
-    // our identity (loaded/saved in me.info)
-    std::vector<uint8_t> clientId;      // 16 bytes
-    std::string          privateKeyPEM; // RSA priv key PEM
-    uint8_t              version = 1;
+    /* ─── Our identity ─────────────────────────────── */
+    std::vector<uint8_t> clientId;      // 16-byte ID assigned by server
+    std::string          privateKeyPEM; // RSA private key (PEM)
+    uint8_t              version = 2;   // protocol version
 
-    // store symmetric keys per-sender (key = sender-ID hex, value = AES key)
-    std::unordered_map<std::string, std::vector<uint8_t>> symKeyStore;
-    // cache of peers’ RSA public keys (hex ID → DER bytes)
-    std::unordered_map<std::string, std::vector<uint8_t>> peerPubKeys;
-    // cache of clients (ID → public key DER)
-    std::unordered_map<std::string, std::vector<uint8_t>> clientsMap;
+    /* ─── In-memory caches ─────────────────────────── */
+    // peer symmetric keys   (hex-ID → AES key)
+    std::unordered_map<std::string,std::vector<uint8_t>> symKeyStore;
+    // peer RSA public keys  (hex-ID → DER bytes)
+    std::unordered_map<std::string,std::vector<uint8_t>> peerPubKeys;
+    // users list            (username → client ID bytes)
+    std::unordered_map<std::string,std::vector<uint8_t>> clientsMap;
+    // ID → name mapping for nicer printouts
+    std::unordered_map<std::string,std::string>          idToName;
 
-    // server info
+    /* ─── Server info ──────────────────────────────── */
     std::string serverAddress;
     int         serverPort;
 
-    // init / persistence
+    /* ─── Init & persistence ───────────────────────── */
     void readServerInfo();
     bool checkIfRegistered();
     void loadMeInfo();
     void saveMeInfo(const std::string& username);
 
-    // UI
-    void showMenu();
+    /* ─── Menu helpers ─────────────────────────────── */
+    static void showMenu();
     void handleChoice(int choice);
 
-    // actions
+    /* ─── Actions ──────────────────────────────────── */
     void registerUser();
     void requestClientsList();
     void requestPublicKey();

@@ -3,7 +3,6 @@ import socket
 import threading
 import os
 import logging
-import struct
 
 from protocol import Protocol
 from registry import ClientRegistry
@@ -11,55 +10,56 @@ from handlers import HANDLERS, HandlerContext
 
 logging.basicConfig(level=logging.INFO)
 
+SERVER_VERSION = 1
 HOST = '0.0.0.0'
 DEFAULT_PORT = 1357
 CONFIG_FILE = 'myport.info'
 
 # Dynamically read the port from the configuration file
+PORT = DEFAULT_PORT
 if os.path.exists(CONFIG_FILE):
     try:
         with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
             PORT = int(f.read().strip())
     except ValueError:
         logging.warning(f"Invalid port value in {CONFIG_FILE}, using default {DEFAULT_PORT}")
-        PORT = DEFAULT_PORT
 else:
     logging.warning(f"{CONFIG_FILE} not found, using default port {DEFAULT_PORT}")
-    PORT = DEFAULT_PORT
 
 
 def handle_client(conn, addr, registry: ClientRegistry):
-    print(f"[INFO] Connection from {addr}")
+    logging.info(f"Connection from {addr}")
     try:
         while True:
             try:
                 client_id, version, code, payload = Protocol.read_request(conn)
-                print(f"[DEBUG] Received request from {addr}")
-                print(f"[DEBUG] Code: {code}")
-                print(f"[DEBUG] Client ID: {client_id.hex()}")
-                print(f"[DEBUG] Payload size: {len(payload)} bytes")
+                ctx = HandlerContext(client_id, version, payload, registry)
+                handler = HANDLERS.get(code)
+
+                if handler:
+                    logging.info(f"Handling request code {code}")
+                    response = handler(ctx)
+                    if code != 600:
+                        registry.update_last_seen(client_id)
+                else:
+                    logging.warning(f"Unknown request code {code}, sending error 9000")
+                    response = Protocol.make_response(SERVER_VERSION, 9000)
+
             except Exception as e:
-                print(f"[ERROR] Failed to read request: {e}")
+                logging.error(f"Failed to process request from {addr}: {e}")
+                response = Protocol.make_response(SERVER_VERSION, 9000)
+
+            try:
+                conn.sendall(response)
+            except Exception as e:
+                logging.error(f"Failed to send response to {addr}: {e}")
                 break
 
-            ctx = HandlerContext(client_id, version, payload, registry)
-            handler = HANDLERS.get(code)
-
-            if handler:
-                print(f"[INFO] Handling request code {code}")
-                response = handler(ctx)
-            else:
-                print(f"[WARN] Unknown request code {code}, sending error 9000")
-                response = Protocol.make_response(version, 9000)
-
-            conn.sendall(response)
-
     except Exception as e:
-        print(f"[ERROR] Outer exception: {e}")
+        logging.error(f"Outer exception: {e}")
     finally:
-        print(f"[INFO] Connection closed from {addr}")
+        logging.info(f"Connection closed from {addr}")
         conn.close()
-
 
 def main():
     # Initialize the client registry

@@ -109,13 +109,6 @@ std::vector<uint8_t> Connection::sendAndReceive(const std::vector<uint8_t>& data
                            (header[5] << 16) |
                            (header[6] << 24);
 
-    // Debug print: header and payload size
-    std::cout << "[DEBUG] Received response:" << std::endl;
-    std::cout << "  Version: " << static_cast<int>(header[0]) << std::endl;
-    uint16_t code = header[1] | (header[2] << 8);
-    std::cout << "  Code: " << code << std::endl;
-    std::cout << "  Payload size: " << payloadSize << std::endl;
-
     // Receive payload
     std::vector<uint8_t> payload;
     if (payloadSize > 0) {
@@ -123,8 +116,6 @@ std::vector<uint8_t> Connection::sendAndReceive(const std::vector<uint8_t>& data
             throw std::runtime_error("Failed to receive payload");
         }
     }
-
-    std::cout << "  Total received: " << (7 + payloadSize) << " bytes" << std::endl;
 
     // Combine header + payload
     std::vector<uint8_t> response;

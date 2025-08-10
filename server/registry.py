@@ -48,3 +48,10 @@ class ClientRegistry:
         pending = [m for m in self._messages if m[1] == to_client]
         self._messages = [m for m in self._messages if m[1] != to_client]
         return pending
+
+
+    def update_last_seen(self, client_id: bytes):
+        """Update the last_seen timestamp for an existing client."""
+        if client_id in self._clients:
+            username, public_key, _ = self._clients[client_id]
+            self._clients[client_id] = (username, public_key, datetime.utcnow())
