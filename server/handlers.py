@@ -19,15 +19,21 @@ class HandlerContext:
         return parse_register_payload(self.payload)
 
 
+# handlers.py
 def handle_register(ctx: HandlerContext) -> bytes:
     """
     Handle registration requests (code 600).
     Return response code 2100 with new client_id.
     """
-    username, pubkey = ctx.parse_register()
+    try:
+        username, pubkey = ctx.parse_register()  # ASCII only by spec
+    except UnicodeDecodeError:
+        # Registration payload had non-ASCII characters in username
+        return Protocol.make_response(ctx.version, 9000)
     new_id = ctx.registry.register(username, pubkey)
-    print(f"[DEBUG] Sending response: code=2100, payload={new_id.hex()} length={len(new_id)}")
+    # removed noisy print
     return Protocol.make_response(ctx.version, 2100, new_id)
+
 
 
 def handle_users_list(ctx: HandlerContext) -> bytes:

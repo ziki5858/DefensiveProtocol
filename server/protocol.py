@@ -1,6 +1,5 @@
 import struct
 
-
 class Protocol:
     HEADER_FMT = '<16s B H I'  # little-endian: 16s=client_id, B=version, H=code, I=payload_size
     HEADER_SIZE = struct.calcsize(HEADER_FMT)

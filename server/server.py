@@ -27,39 +27,56 @@ else:
     logging.warning(f"{CONFIG_FILE} not found, using default port {DEFAULT_PORT}")
 
 
+# server.py - reduce noise + treat client close as normal
+logging.basicConfig(level=logging.WARNING)  # <- for submission
+
 def handle_client(conn, addr, registry: ClientRegistry):
     logging.info(f"Connection from {addr}")
     try:
         while True:
             try:
                 client_id, version, code, payload = Protocol.read_request(conn)
-                ctx = HandlerContext(client_id, version, payload, registry)
-                handler = HANDLERS.get(code)
+            except ConnectionError:
+                # Client closed the socket gracefully
+                logging.info(f"Client {addr} disconnected while reading request")
+                break
+            except Exception as e:
+                # Real parse error -> send 9000 once and keep serving
+                logging.warning(f"Failed to process request from {addr}: {e}")
+                response = Protocol.make_response(SERVER_VERSION, 9000)
+                try:
+                    conn.sendall(response)
+                except Exception:
+                    pass
+                continue
 
+            ctx = HandlerContext(client_id, version, payload, registry)
+            handler = HANDLERS.get(code)
+            try:
                 if handler:
-                    logging.info(f"Handling request code {code}")
+                    logging.debug(f"Handling request code {code}")
                     response = handler(ctx)
                     if code != 600:
                         registry.update_last_seen(client_id)
                 else:
-                    logging.warning(f"Unknown request code {code}, sending error 9000")
+                    logging.warning(f"Unknown request code {code}, sending 9000")
                     response = Protocol.make_response(SERVER_VERSION, 9000)
-
             except Exception as e:
-                logging.error(f"Failed to process request from {addr}: {e}")
+                logging.warning(f"Handler for code {code} failed: {e}")
                 response = Protocol.make_response(SERVER_VERSION, 9000)
 
             try:
                 conn.sendall(response)
-            except Exception as e:
-                logging.error(f"Failed to send response to {addr}: {e}")
+            except (BrokenPipeError, ConnectionResetError):
+                logging.info(f"Connection closed while sending to {addr}")
                 break
-
-    except Exception as e:
-        logging.error(f"Outer exception: {e}")
+            except Exception as e:
+                logging.warning(f"Failed to send response to {addr}: {e}")
+                break
     finally:
         logging.info(f"Connection closed from {addr}")
         conn.close()
+
 
 def main():
     # Initialize the client registry

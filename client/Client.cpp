@@ -37,16 +37,30 @@ Client::Client() {
 }
 
 
-
 void Client::run() {
     if (checkIfRegistered()) {
         std::cout << "Welcome back, your ID = " << toHex(clientId) << "\n";
     }
+    showMenu();
+
     while (true) {
+        int choice;
+        if (!(std::cin >> choice)) {
+            // Input was not a number -> clear error flags and discard invalid input
+            std::cin.clear();
+            std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+            std::cout << "Invalid choice\n";
+            showMenu();
+            continue; // Go back to the menu
+        }
+
+        // Discard any extra characters left in the input buffer
+        std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+
+        if (choice == 0) break; // Exit loop if choice is 0
+        handleChoice(choice);   // Execute the selected option
         showMenu();
-        int choice; std::cin >> choice;
-        if (choice == 0) break;
-        handleChoice(choice);
+
     }
 }
 
@@ -106,9 +120,6 @@ void Client::handleChoice(int c) {
         case 151: requestSymmetricKey();   break;
         case 152: sendSymmetricKey();      break;
         case 153: sendFileMessage();     break;
-        case 0:
-            exit(0);
-        default:  std::cout<<"Invalid choice\n";
     }
 }
 
@@ -226,19 +237,29 @@ void Client::requestWaitingMessages() {
 
     size_t i = 0;
     while (i < resp.payload.size()) {
-        std::vector<uint8_t> fromId(resp.payload.begin()+i, resp.payload.begin()+i+16); i += 16;
+        // --- Parse fixed fields ---
+        std::vector<uint8_t> fromId(resp.payload.begin() + i, resp.payload.begin() + i + 16);
+        i += 16;
 
-        uint32_t msgId =  resp.payload[i] | (resp.payload[i+1]<<8)
-                          | (resp.payload[i+2]<<16) | (resp.payload[i+3]<<24); i += 4;
+        uint32_t msgId =  resp.payload[i] | (resp.payload[i+1] << 8)
+                          | (resp.payload[i+2] << 16) | (resp.payload[i+3] << 24);
+        i += 4;
 
-        uint8_t  type  = resp.payload[i++];
-        uint32_t len   =  resp.payload[i] | (resp.payload[i+1]<<8)
-                          | (resp.payload[i+2]<<16) | (resp.payload[i+3]<<24); i += 4;
+        uint8_t type = resp.payload[i++];
 
-        std::vector<uint8_t> content(resp.payload.begin()+i, resp.payload.begin()+i+len); i += len;
+        uint32_t len = resp.payload[i] | (resp.payload[i+1] << 8)
+                       | (resp.payload[i+2] << 16) | (resp.payload[i+3] << 24);
+        i += 4;
+
+        std::vector<uint8_t> content(resp.payload.begin() + i, resp.payload.begin() + i + len);
+        i += len;
 
         std::string senderHex = toHex(fromId);
         const std::string& who = idToName.count(senderHex) ? idToName[senderHex] : senderHex;
+
+        // --- Unified output format ---
+        std::cout << "From: " << who << "\n";
+        std::cout << "Content:\n";
 
         if (type == 1) {
             // Symmetric key request
@@ -246,34 +267,49 @@ void Client::requestWaitingMessages() {
         }
         else if (type == 2) {
             // Symmetric key received
-            symKeyStore[senderHex] = crypto.decryptRSA(content);
-            std::cout << "symmetric key received\n";
+            try {
+                symKeyStore[senderHex] = crypto.decryptRSA(content);
+                std::cout << "symmetric key received\n";
+            } catch (...) {
+                std::cout << "can't decrypt message\n";
+            }
         }
         else if (type == 3) { // Text message
-            if (!symKeyStore.count(senderHex)) {
+            auto it = symKeyStore.find(senderHex);
+            if (it == symKeyStore.end()) {
                 std::cout << "can't decrypt message\n";
-                continue;
+            } else {
+                try {
+                    auto plain = crypto.aesCBCDecrypt(content, it->second);
+                    std::cout << std::string(plain.begin(), plain.end()) << "\n";
+                } catch (...) {
+                    std::cout << "can't decrypt message\n";
+                }
             }
-            auto plain = crypto.aesCBCDecrypt(content, symKeyStore[senderHex]);
-            std::cout << "From: " << who << "\n";
-            std::cout << "Content:\n";
-            std::cout << std::string(plain.begin(), plain.end()) << "\n";
-            std::cout << "-----<EOM>-----\n\n";
         }
         else if (type == 4) { // File message (bonus)
-            if (!symKeyStore.count(senderHex)) {
+            auto it = symKeyStore.find(senderHex);
+            if (it == symKeyStore.end()) {
                 std::cout << "can't decrypt message\n";
-                continue;
+            } else {
+                try {
+                    auto plain = crypto.aesCBCDecrypt(content, it->second);
+                    auto tmp   = std::filesystem::temp_directory_path();
+                    std::string fname = (tmp / ("msgu_" + senderHex + ".bin")).string();
+                    std::ofstream(fname, std::ios::binary)
+                            .write(reinterpret_cast<char*>(plain.data()), plain.size());
+                    std::cout << fname << "\n";
+                } catch (...) {
+                    std::cout << "can't decrypt message\n";
+                }
             }
-            auto plain = crypto.aesCBCDecrypt(content, symKeyStore[senderHex]);
-            auto tmp   = std::filesystem::temp_directory_path();
-            std::string fname = (tmp / ("msgu_" + senderHex + ".bin")).string();
-            std::ofstream(fname, std::ios::binary).write(reinterpret_cast<char*>(plain.data()), plain.size());
-            std::cout << fname << '\n';
+        } else {
+            std::cout << "[unknown message type]\n";
         }
+
+        std::cout << "-----<EOM>-----\n\n";
     }
 }
-
 
 
 void Client::requestSymmetricKey() {
