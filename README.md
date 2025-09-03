@@ -151,3 +151,6 @@ Typical interaction:
 - Final Project – Open University, Maman 15
 
 ---
+⚠️ License: All Rights Reserved  
+This project is public for viewing only.  
+Any copying, distribution, or usage without explicit permission is strictly forbidden.
